@@ -279,6 +279,18 @@ extern "C" {
     /// are only perceived if it's stored back. You own the settings map and are
     /// responsible for freeing it.
     pub fn settings_map_load() -> SettingsMap;
+    /// Stores the Legacy XML AutoSplitterSettings contents in the buffer given,
+    /// if it was configured with Legacy XML and not a settings map.
+    /// Returns `false` if it was not configured with Legacy XML,
+    /// or if the buffer is too small.
+    /// After this call, whether it was successful or not,
+    /// the `buf_len_ptr` will be set to the required buffer size,
+    /// or to 0 if it was not configured with Legacy XML.
+    #[cfg(feature = "alloc")]
+    pub fn settings_get_legacy_raw_xml(
+        buf_ptr: *mut u8,
+        buf_len_ptr: *mut usize,
+    ) -> bool;
     /// Stores a copy of the settings map as the new global settings map. This
     /// will overwrite the previous global settings map. You still retain
     /// ownership of the map, which means you still need to free it. There's a

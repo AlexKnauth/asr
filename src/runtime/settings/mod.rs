@@ -63,3 +63,25 @@ pub use gui::Gui;
 pub use list::*;
 pub use map::*;
 pub use value::*;
+
+#[cfg(feature = "alloc")]
+use crate::runtime::sys;
+
+/// Gets the Legacy XML AutoSplitterSettings contents,
+/// if it was configured with Legacy XML and not a settings map.
+/// Returns `None` if it was not configured with Legacy XML.
+#[cfg(feature = "alloc")]
+pub fn get_legacy_raw_xml() -> Option<alloc::string::String> {
+    unsafe {
+        let mut len = 0;
+        let success = sys::settings_get_legacy_raw_xml(core::ptr::null_mut(), &mut len);
+        if len == 0 && !success {
+            return None;
+        }
+        let mut buf = alloc::vec::Vec::with_capacity(len);
+        let success = sys::settings_get_legacy_raw_xml(buf.as_mut_ptr(), &mut len);
+        assert!(success);
+        buf.set_len(len);
+        Some(alloc::string::String::from_utf8_unchecked(buf))
+    }
+}
