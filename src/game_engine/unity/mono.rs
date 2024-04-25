@@ -4,12 +4,7 @@
 #[cfg(feature = "alloc")]
 use crate::file_format::macho;
 use crate::{
-    deep_pointer::DeepPointer,
-    file_format::{elf, pe},
-    future::retry,
-    signature::Signature,
-    string::ArrayCString,
-    Address, Address32, Address64, Error, PointerSize, Process,
+    deep_pointer::DeepPointer, file_format::{elf, pe}, future::retry, print_limited, print_message, signature::Signature, string::ArrayCString, Address, Address32, Address64, Error, PointerSize, Process
 };
 use core::{array, cell::RefCell, iter};
 
@@ -34,6 +29,7 @@ impl Module {
     /// [`attach`](Self::attach) instead.
     pub fn attach_auto_detect(process: &Process) -> Option<Self> {
         let version = detect_version(process)?;
+        print_message("mono.rs attach_auto_detect 32: version detected.");
         Self::attach(process, version)
     }
 
@@ -55,6 +51,7 @@ impl Module {
         ]
         .into_iter()
         .find_map(|(name, format)| Some((process.get_module_range(name).ok()?, format)))?;
+        print_message("mono.rs attach 54: mono found.");
         let module = module_range.0;
 
         let pointer_size = match format {
@@ -63,8 +60,10 @@ impl Module {
             #[cfg(feature = "alloc")]
             BinaryFormat::MachO => macho::pointer_size(process, module_range)?,
         };
+        print_message("mono.rs attach 63: pointer size found.");
 
         let offsets = Offsets::new(version, pointer_size, format)?;
+        print_message("mono.rs attach 66: offsets found.");
 
         let root_domain_function_address = match format {
             BinaryFormat::PE => {
@@ -91,11 +90,20 @@ impl Module {
                     .find(|symbol| {
                         symbol
                             .get_name::<26>(process)
-                            .is_ok_and(|name| name.matches("_mono_assembly_foreach"))
+                            .is_ok_and(|name| {
+                                if !name.is_empty() && name.is_ascii() {
+                                    let s = alloc::string::String::from_utf8_lossy(&name);
+                                    if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                                        print_limited::<128>(&format_args!("{:?}", s));
+                                    }
+                                }
+                                name.matches("_mono_assembly_foreach")
+                            })
                     })?
                     .address
             }
         };
+        print_message("mono.rs attach 97: root_domain_function_address found.");
 
         let assemblies_pointer: Address = match (pointer_size, format) {
             (PointerSize::Bit64, BinaryFormat::PE) => {
@@ -132,11 +140,13 @@ impl Module {
             }
             _ => return None,
         };
+        print_message("mono.rs attach 134: assemblies_pointer found.");
 
         let assemblies = process
             .read_pointer(assemblies_pointer, pointer_size)
             .ok()
             .filter(|val| !val.is_null())?;
+        print_message("mono.rs attach 140: assemblies found.");
 
         Some(Self {
             pointer_size,
@@ -1219,14 +1229,18 @@ fn detect_version(process: &Process) -> Option<Version> {
         || process.get_module_address("libmono.so").is_ok()
         || process.get_module_address("libmono.0.dylib").is_ok()
     {
+        print_message("mono.rs detect_version 1223: mono found.");
         // If the module mono.dll is present, then it's either V1 or V1Cattrs.
         // In order to distinguish between them, we check the first class listed in the
         // default Assembly-CSharp image and check for the pointer to its name, assuming it's using V1.
         // If such pointer matches the address to the assembly image instead, then it's V1Cattrs.
         // The idea is taken from https://github.com/Voxelse/Voxif/blob/main/Voxif.Helpers/Voxif.Helpers.UnityHelper/UnityHelper.cs#L343-L344
         let module = Module::attach(process, Version::V1)?;
+        print_message("mono.rs detect_version 1230: module attached.");
         let image = module.get_default_image(process)?;
+        print_message("mono.rs detect_version 1232: default image found.");
         let class = image.classes(process, &module).next()?;
+        print_message("mono.rs detect_version 1234: first class found.");
 
         let pointer_to_image = process
             .read_pointer(
@@ -1259,6 +1273,7 @@ fn detect_version(process: &Process) -> Option<Version> {
         #[cfg(feature = "alloc")]
         BinaryFormat::MachO => process.get_module_range(name).ok(),
     })?;
+    print_message("mono.rs detect_version 1267: UnityPlayer found.");
 
     const SIG_202X: Signature<6> = Signature::new("00 32 30 32 ?? 2E");
 
