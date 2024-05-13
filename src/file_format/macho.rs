@@ -10,6 +10,8 @@ use alloc::collections::BTreeMap;
 use crate::{string::ArrayCString, Error};
 use crate::{Address, PointerSize, Process};
 
+const CSTR: usize = 128;
+
 // Magic mach-o header constants from:
 // https://opensource.apple.com/source/xnu/xnu-4570.71.2/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
 const MH_MAGIC_32: u32 = 0xfeedface;
@@ -110,61 +112,113 @@ impl Symbol {
     }
 }
 
-/// Iterates over the exported symbols for a given module.
+/// Symbols for a given module.
 /// Only 64-bit Mach-O format is supported
 #[cfg(feature = "alloc")]
-pub fn symbols(
-    process: &Process,
-    range: (Address, u64),
-) -> Option<impl FusedIterator<Item = Symbol> + '_> {
-    let page = scan_macho_page(process, range)?;
-    let offsets = MachOFormatOffsets::new();
-    let number_of_commands: u32 = process.read(page + offsets.number_of_commands).ok()?;
+pub struct Symbols<'a> {
+    process: &'a Process,
+    module_name: &'a str,
+    module_range: (Address, u64),
+    page: Address,
+    offsets: MachOFormatOffsets,
+    number_of_commands: u32,
+    symtab_fileoff: u32,
+    number_of_symbols: u32,
+    strtab_fileoff: u32,
+    map_fileoff_to_vmaddr: BTreeMap<u64, u64>,
+    symtab_vmaddr: u64,
+    strtab_vmaddr: u64,
+}
 
-    let mut symtab_fileoff: u32 = 0;
-    let mut number_of_symbols: u32 = 0;
-    let mut strtab_fileoff: u32 = 0;
-    let mut map_fileoff_to_vmaddr: BTreeMap<u64, u64> = BTreeMap::new();
+#[cfg(feature = "alloc")]
+impl<'a> Symbols<'a> {
+    /// Attempts to initialize state for the symbols for a given module.
+    pub fn new(
+        process: &'a Process,
+        module_name: &'a str,
+        module_range: (Address, u64),
+    ) -> Option<Self> {
+        let page = scan_macho_page(process, module_range)?;
+        let offsets = MachOFormatOffsets::new();
+        let number_of_commands: u32 = process.read(page + offsets.number_of_commands).ok()?;
 
-    let mut next: u32 = offsets.load_commands;
-    for _i in 0..number_of_commands {
-        let cmdtype: u32 = process.read(page + next).ok()?;
-        if cmdtype == LC_SYMTAB {
-            symtab_fileoff = process.read(page + next + offsets.symtab_offset).ok()?;
-            number_of_symbols = process.read(page + next + offsets.number_of_symbols).ok()?;
-            strtab_fileoff = process.read(page + next + offsets.strtab_offset).ok()?;
-        } else if cmdtype == LC_SEGMENT_64 {
-            let vmaddr: u64 = process.read(page + next + offsets.segcmd64_vmaddr).ok()?;
-            let fileoff: u64 = process.read(page + next + offsets.segcmd64_fileoff).ok()?;
-            map_fileoff_to_vmaddr.insert(fileoff, vmaddr);
+        let mut symtab_fileoff: u32 = 0;
+        let mut number_of_symbols: u32 = 0;
+        let mut strtab_fileoff: u32 = 0;
+        let mut map_fileoff_to_vmaddr: BTreeMap<u64, u64> = BTreeMap::new();
+
+        let mut next: u32 = offsets.load_commands;
+        for _i in 0..number_of_commands {
+            let cmdtype: u32 = process.read(page + next).ok()?;
+            if cmdtype == LC_SYMTAB {
+                symtab_fileoff = process.read(page + next + offsets.symtab_offset).ok()?;
+                number_of_symbols = process.read(page + next + offsets.number_of_symbols).ok()?;
+                strtab_fileoff = process.read(page + next + offsets.strtab_offset).ok()?;
+            } else if cmdtype == LC_SEGMENT_64 {
+                let vmaddr: u64 = process.read(page + next + offsets.segcmd64_vmaddr).ok()?;
+                let fileoff: u64 = process.read(page + next + offsets.segcmd64_fileoff).ok()?;
+                map_fileoff_to_vmaddr.insert(fileoff, vmaddr);
+            }
+            let command_size: u32 = process.read(page + next + offsets.command_size).ok()?;
+            next += command_size;
         }
-        let command_size: u32 = process.read(page + next + offsets.command_size).ok()?;
-        next += command_size;
+
+        if symtab_fileoff == 0 || number_of_symbols == 0 || strtab_fileoff == 0 {
+            return None;
+        }
+
+        let symtab_vmaddr = fileoff_to_vmaddr(&map_fileoff_to_vmaddr, symtab_fileoff as u64);
+        let strtab_vmaddr = fileoff_to_vmaddr(&map_fileoff_to_vmaddr, strtab_fileoff as u64);
+
+        Some(Self {
+            process,
+            module_name,
+            module_range,
+            page,
+            offsets,
+            number_of_commands,
+            symtab_fileoff,
+            number_of_symbols,
+            strtab_fileoff,
+            map_fileoff_to_vmaddr,
+            symtab_vmaddr,
+            strtab_vmaddr,
+        })
     }
 
-    if symtab_fileoff == 0 || number_of_symbols == 0 || strtab_fileoff == 0 {
-        return None;
-    }
-
-    let symtab_vmaddr = fileoff_to_vmaddr(&map_fileoff_to_vmaddr, symtab_fileoff as u64);
-    let strtab_vmaddr = fileoff_to_vmaddr(&map_fileoff_to_vmaddr, strtab_fileoff as u64);
-
-    Some(
-        (0..number_of_symbols)
+    /// Iterates over the exported symbols.
+    pub fn iter(&self) -> impl FusedIterator<Item = Symbol> + '_ {
+        (0..self.number_of_symbols)
             .filter_map(move |j| {
-                let nlist_item = page + symtab_vmaddr + (j * offsets.size_of_nlist_item);
-                let symname_offset: u32 = process.read(nlist_item).ok()?;
-                let string_address = page + strtab_vmaddr + symname_offset;
-                let symbol_fileoff = process.read(nlist_item + offsets.nlist_value).ok()?;
-                let symbol_vmaddr = fileoff_to_vmaddr(&map_fileoff_to_vmaddr, symbol_fileoff);
-                let symbol_address = page + symbol_vmaddr;
+                let nlist_item =
+                    self.page + self.symtab_vmaddr + (j * self.offsets.size_of_nlist_item);
+                let symname_offset: u32 = self.process.read(nlist_item).ok()?;
+                let string_address = self.page + self.strtab_vmaddr + symname_offset;
+                let symbol_fileoff = self
+                    .process
+                    .read(nlist_item + self.offsets.nlist_value)
+                    .ok()?;
+                let symbol_vmaddr = fileoff_to_vmaddr(&self.map_fileoff_to_vmaddr, symbol_fileoff);
+                let symbol_address = self.page + symbol_vmaddr;
                 Some(Symbol {
                     address: symbol_address,
                     name_addr: string_address,
                 })
             })
-            .fuse(),
-    )
+            .fuse()
+    }
+
+    /// Finds the address of an exported symbol by name.
+    pub fn find_address(&self, symbol_name: &str) -> Option<Address> {
+        if let Some(symbol) = self.iter().find(|symbol| {
+            symbol
+                .get_name::<CSTR>(self.process)
+                .is_ok_and(|name| name.matches(symbol_name))
+        }) {
+            return Some(symbol.address);
+        }
+        None
+    }
 }
 
 #[cfg(feature = "alloc")]

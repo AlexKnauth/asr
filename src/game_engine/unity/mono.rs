@@ -44,7 +44,7 @@ impl Module {
     /// advance, use [`attach_auto_detect`](Self::attach_auto_detect) instead.
     pub fn attach(process: &Process, version: Version) -> Option<Self> {
         #[allow(unused)]
-        let (module_range, format) = [
+        let (module_range, module_name, format) = [
             ("mono.dll", BinaryFormat::PE),
             ("libmono.so", BinaryFormat::ELF),
             #[cfg(feature = "alloc")]
@@ -55,7 +55,7 @@ impl Module {
             ("libmonobdwgc-2.0.dylib", BinaryFormat::MachO),
         ]
         .into_iter()
-        .find_map(|(name, format)| Some((process.get_module_range(name).ok()?, format)))?;
+        .find_map(|(name, format)| Some((process.get_module_range(name).ok()?, name, format)))?;
         let module = module_range.0;
 
         let pointer_size = match format {
@@ -87,15 +87,8 @@ impl Module {
                     .address
             }
             #[cfg(feature = "alloc")]
-            BinaryFormat::MachO => {
-                macho::symbols(process, module_range)?
-                    .find(|symbol| {
-                        symbol
-                            .get_name::<26>(process)
-                            .is_ok_and(|name| name.matches("_mono_assembly_foreach"))
-                    })?
-                    .address
-            }
+            BinaryFormat::MachO => macho::Symbols::new(process, module_name, module_range)?
+                .find_address("_mono_assembly_foreach")?,
         };
 
         let assemblies: Address = match (pointer_size, format) {
