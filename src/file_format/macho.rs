@@ -6,6 +6,8 @@ use core::iter::FusedIterator;
 #[cfg(feature = "alloc")]
 use alloc::collections::BTreeMap;
 
+#[cfg(feature = "std")]
+use crate::signature::Signature;
 #[cfg(feature = "alloc")]
 use crate::{string::ArrayCString, Error};
 use crate::{Address, PointerSize, Process};
@@ -56,6 +58,8 @@ const LC_SYMTAB: u32 = 0x2;
 /// 64-bit segment of this file to be mapped
 #[cfg(feature = "alloc")]
 const LC_SEGMENT_64: u32 = 0x19;
+
+const HEADER_SIZE: usize = 32;
 
 #[cfg(feature = "alloc")]
 struct MachOFormatOffsets {
@@ -121,7 +125,6 @@ pub struct Symbols<'a> {
     module_range: (Address, u64),
     page: Address,
     offsets: MachOFormatOffsets,
-    number_of_commands: u32,
     symtab_fileoff: u32,
     number_of_symbols: u32,
     strtab_fileoff: u32,
@@ -176,7 +179,6 @@ impl<'a> Symbols<'a> {
             module_range,
             page,
             offsets,
-            number_of_commands,
             symtab_fileoff,
             number_of_symbols,
             strtab_fileoff,
@@ -210,12 +212,40 @@ impl<'a> Symbols<'a> {
 
     /// Finds the address of an exported symbol by name.
     pub fn find_address(&self, symbol_name: &str) -> Option<Address> {
+        // Try finding the symbol purely in memory first.
         if let Some(symbol) = self.iter().find(|symbol| {
             symbol
                 .get_name::<CSTR>(self.process)
                 .is_ok_and(|name| name.matches(symbol_name))
         }) {
             return Some(symbol.address);
+        }
+        #[cfg(feature = "std")]
+        {
+            // Otherwise try finding the symbol in the file.
+            let symbol_name_bytes = symbol_name.as_bytes();
+            let symbol_name_len = symbol_name_bytes.len();
+            let module_path = self.process.get_module_path(self.module_name).ok()?;
+            let all_bytes = file_read_all_bytes(module_path).ok()?;
+            let macho_header: [u8; HEADER_SIZE] = self.process.read(self.page).ok()?;
+            let macho_offset = memchr::memmem::find(&all_bytes, &macho_header)?;
+            let macho_bytes = &all_bytes[macho_offset..];
+
+            for j in 0..self.number_of_symbols {
+                let nlist_item = self.symtab_fileoff + (j * self.offsets.size_of_nlist_item);
+                let symname_offset: u32 = slice_read(macho_bytes, nlist_item).ok()?;
+                let string_start = (self.strtab_fileoff + symname_offset) as usize;
+                let string_end = string_start + symbol_name_len;
+                if macho_bytes[string_end] == 0
+                    && &macho_bytes[string_start..string_end] == symbol_name_bytes
+                {
+                    let symbol_fileoff: u64 =
+                        slice_read(macho_bytes, nlist_item + self.offsets.nlist_value).ok()?;
+                    let file_contents: [u8; 20] = slice_read(macho_bytes, symbol_fileoff).ok()?;
+                    let file_signature: Signature<20> = Signature::Simple(file_contents);
+                    return file_signature.scan_process_range(self.process, self.module_range);
+                }
+            }
         }
         None
     }
@@ -228,4 +258,27 @@ fn fileoff_to_vmaddr(map: &BTreeMap<u64, u64>, fileoff: u64) -> u64 {
         .max_by_key(|(&k, _)| k)
         .map(|(&k, &v)| v + fileoff - k)
         .unwrap_or(fileoff)
+}
+
+// --------------------------------------------------------
+
+#[cfg(feature = "std")]
+fn file_read_all_bytes<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<Vec<u8>> {
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer: Vec<u8> = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut buffer)?;
+    Ok(buffer)
+}
+
+#[cfg(feature = "std")]
+/// Reads a value of the type specified from the slice at the address
+/// given.
+fn slice_read<T: bytemuck::CheckedBitPattern, N: Into<u64>>(
+    slice: &[u8],
+    address: N,
+) -> Result<T, bytemuck::checked::CheckedCastError> {
+    let start: usize = Into::<u64>::into(address) as usize;
+    let size = core::mem::size_of::<T>();
+    let slice_src = &slice[start..(start + size)];
+    bytemuck::checked::try_from_bytes(slice_src).cloned()
 }
