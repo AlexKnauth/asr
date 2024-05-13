@@ -10,7 +10,7 @@ use crate::FromEndian;
 
 /// A nul-terminated string that is stored in an array of a fixed size `N`. This
 /// can be read from a process's memory.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
 pub struct ArrayCString<const N: usize>([u8; N]);
 
