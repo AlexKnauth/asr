@@ -112,6 +112,7 @@ pub fn state() -> TimerState {
     }
 }
 
+#[cfg(feature = "split-index")]
 /// Accesses the index of the split the attempt is currently on. If there's
 /// no attempt in progress, `-1` is returned instead. This returns an
 /// index that is equal to the amount of segments when the attempt is
