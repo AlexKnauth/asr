@@ -59,6 +59,7 @@ const LC_SYMTAB: u32 = 0x2;
 #[cfg(feature = "alloc")]
 const LC_SEGMENT_64: u32 = 0x19;
 
+#[cfg(feature = "std")]
 const HEADER_SIZE: usize = 32;
 
 #[cfg(feature = "alloc")]
@@ -119,6 +120,7 @@ impl Symbol {
 /// Symbols for a given module.
 /// Only 64-bit Mach-O format is supported
 #[cfg(feature = "alloc")]
+#[allow(unused)]
 pub struct Symbols<'a> {
     process: &'a Process,
     module_name: &'a str,
