@@ -1,6 +1,7 @@
 //! Support for parsing ELF files (Executable and Linking Format).
 
 use core::{
+    cmp,
     fmt,
     iter::{self, FusedIterator},
     mem::{self, size_of},
@@ -993,6 +994,28 @@ struct Elf64 {
     e_shentsize: u16,
     e_shnum: u16,
     e_shstrndx: u16,
+}
+
+/// Reads the size of the image of a module from the given process.
+pub fn read_size_of_image(process: &Process, module_address: impl Into<Address>) -> Option<u64> {
+    let module_address: Address = module_address.into();
+    let header = process.read::<Header>(module_address).ok()?;
+    let info = Info::parse(bytemuck::bytes_of(&header))?;
+    match info.bitness {
+        Bitness::BITNESS_64 => {
+            let header = process.read::<Elf64>(module_address).ok()?;
+            let s1 = header.e_ehsize as u64 + (header.e_phnum as u64 * header.e_phentsize as u64) + (header.e_shnum as u64 * header.e_shentsize as u64);
+            let s2 = header.e_shoff + (header.e_shentsize as u64 * header.e_shnum as u64);
+            Some(cmp::max(s1, s2))
+        }
+        Bitness::BITNESS_32 => {
+            let header = process.read::<Elf32>(module_address).ok()?;
+            let s1 = header.e_ehsize as u64 + (header.e_phnum as u64 * header.e_phentsize as u64) + (header.e_shnum as u64 * header.e_shentsize as u64);
+            let s2 = header.e_shoff as u64 + (header.e_shentsize as u64 * header.e_shnum as u64);
+            Some(cmp::max(s1, s2))
+        }
+        _ => None,
+    }
 }
 
 /// Checks if a given ELF module is 64-bit

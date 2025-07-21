@@ -1118,7 +1118,11 @@ fn detect_version(process: &Process) -> Option<Version> {
             let range = pe::read_size_of_image(process, address)? as u64;
             Some((address, range))
         }
-        BinaryFormat::ELF => process.get_module_range(name).ok(),
+        BinaryFormat::ELF => {
+            let address = process.get_module_address(name).ok()?;
+            let range = elf::read_size_of_image(process, address)? as u64;
+            Some((address, range))
+        }
     })?;
 
     const SIG_202X: Signature<6> = Signature::new("00 32 30 32 ?? 2E");
