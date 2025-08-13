@@ -1,5 +1,8 @@
 //! This module provides functions for interacting with the timer.
 
+#[cfg(feature = "split-index")]
+use super::settings;
+
 use super::sys;
 
 /// The state of the timer.
@@ -120,6 +123,12 @@ pub fn state() -> TimerState {
 /// this value for indexing.
 pub fn current_split_index() -> i32 {
     unsafe { sys::timer_current_split_index() }
+}
+
+#[cfg(feature = "split-index")]
+/// Lists segments splitted or skipped in the current attempt.
+pub fn current_attempt_segments_splitted() -> settings::List {
+    unsafe { settings::List(sys::timer_current_attempt_segments_splitted()) }
 }
 
 /// Sets the game time.

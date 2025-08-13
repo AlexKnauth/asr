@@ -7,7 +7,7 @@ use super::{AsValue, Value};
 /// A list of [`Value`]s that can itself be a [`Value`] and thus be stored in a
 /// [`Map`](super::Map).
 #[repr(transparent)]
-pub struct List(pub(super) sys::SettingsList);
+pub struct List(pub(crate) sys::SettingsList);
 
 impl fmt::Debug for List {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
