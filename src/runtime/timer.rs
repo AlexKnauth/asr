@@ -19,6 +19,37 @@ pub enum TimerState {
     Unknown,
 }
 
+#[cfg(feature = "alloc")]
+#[cfg(feature = "split-index")]
+/// Lists segments splitted or skipped in the current attempt.
+pub fn current_attempt_segments_splitted() -> alloc::vec::Vec<bool> {
+    // SAFETY: buf and len point to the allocated buffer and its capacity.
+    // If the len is less than or equal to capacity after modification,
+    // we know that the buffer was large enough and we can return it.
+    // If the len is larger than the capacity after modification,
+    // we know hat the buffer was too small and we need to call
+    // `timer_current_attempt_segments_splitted` again with a larger buffer.
+    // We then repeat this process until we have a buffer that is large enough.
+    unsafe {
+        let mut buf = alloc::vec::Vec::with_capacity(0);
+
+        loop {
+            // Passed in as the capacity of the buffer, later contains the
+            // length that was actually needed.
+            let mut len = buf.capacity();
+
+            sys::timer_current_attempt_segments_splitted(buf.as_mut_ptr(), &mut len);
+
+            if len <= buf.capacity() {
+                buf.set_len(len);
+                return buf;
+            }
+
+            buf.reserve(len + 1);
+        }
+    }
+}
+
 /// Starts the timer.
 #[inline]
 pub fn start() {
