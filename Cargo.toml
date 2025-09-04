@@ -27,6 +27,7 @@ float-vars = ["ryu"]
 float-vars-small = ["float-vars", "ryu/small"]
 integer-vars = ["itoa"]
 signature = ["memchr"]
+split-index = []
 wasi-no-std = ["libm"]
 
 # Game Engines

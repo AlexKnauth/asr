@@ -85,11 +85,13 @@ extern "C" {
     /// when the attempt is finished, but has not been reset.
     /// So you need to be careful when using this value for indexing.
     /// Same index does not imply same split on undo and then split.
+    #[cfg(feature = "split-index")]
     pub fn timer_current_split_index() -> i64;
     /// Whether the segment at `idx` was splitted this attempt.
     /// Returns `1` if the segment was splitted, or `0` if skipped.
     /// If `idx` is greater than or equal to the current split index,
     /// `-1` is returned instead.
+    #[cfg(feature = "split-index")]
     pub fn timer_segment_splitted(idx: u64) -> i32;
     /// Sets a custom key value pair. This may be arbitrary information that the
     /// auto splitter wants to provide for visualization. The pointers need to
