@@ -118,6 +118,7 @@ pub fn state() -> TimerState {
 /// when the attempt is finished, but has not been reset.
 /// So you need to be careful when using this value for indexing.
 /// Same index does not imply same split on undo and then split.
+#[cfg(feature = "split-index")]
 pub fn current_split_index() -> Option<u64> {
     // SAFETY: It is always safe to call this function.
     let i = unsafe { sys::timer_current_split_index() };
@@ -132,6 +133,7 @@ pub fn current_split_index() -> Option<u64> {
 /// or `Some(false)` if skipped.
 /// If `idx` is greater than or equal to the current split index,
 /// `None` is returned instead.
+#[cfg(feature = "split-index")]
 pub fn segment_splitted(idx: u64) -> Option<bool> {
     // SAFETY: It is always safe to call this function.
     // Even when `idx` is out of bounds,
