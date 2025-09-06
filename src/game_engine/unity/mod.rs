@@ -95,4 +95,5 @@ const CSTR: usize = 128;
 enum BinaryFormat {
     PE,
     ELF,
+    MachO,
 }
