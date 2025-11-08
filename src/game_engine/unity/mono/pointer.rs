@@ -1,5 +1,5 @@
 use super::{Class, Image, Module};
-use crate::{Address, Error, Process};
+use crate::{Address, Error, Process, print_limited};
 use bytemuck::CheckedBitPattern;
 use core::{array, cell::RefCell};
 
@@ -119,9 +119,36 @@ impl<const CAP: usize> UnityPointer<CAP> {
                             .ok_or(Error {})?,
                     };
 
-                    current_class
-                        .get_field_offset(process, module, inner.fields[i])
-                        .ok_or(Error {})?
+                    let mfo = current_class
+                        .get_field_offset(process, module, inner.fields[i]);
+                    if mfo.is_none() {
+                        print_limited::<128>(&format_args!("find_offsets: get_field_offset failed on {}", inner.fields[i]));
+                        if let Some(parent) = current_class.get_parent(process, module) {
+                            let mpfo = parent.get_field_offset(process, module, inner.fields[i]);
+                            if mpfo.is_some() {
+                                print_limited::<128>(&format_args!("find_offsets: get_field_offset succeeded on parent's {}", inner.fields[i]));
+                            } else {
+                                print_limited::<128>(&format_args!("find_offsets: get_field_offset also failed on parent's {}", inner.fields[i]));
+                                if let Some(gramp) = parent.get_parent(process, module) {
+                                    let gmpfo = gramp.get_field_offset(process, module, inner.fields[i]);
+                                    if gmpfo.is_some() {
+                                        print_limited::<128>(&format_args!("find_offsets: get_field_offset succeeded on grandparent's {}", inner.fields[i]));
+                                    } else {
+                                        print_limited::<128>(&format_args!("find_offsets: get_field_offset also failed on grandparent's {}", inner.fields[i]));
+                                        if let Some(ggrmp) = gramp.get_parent(process, module) {
+                                            let ggmpfo = ggrmp.get_field_offset(process, module, inner.fields[i]);
+                                            if ggmpfo.is_some() {
+                                                print_limited::<128>(&format_args!("find_offsets: get_field_offset succeeded on great-grandparent's {}", inner.fields[i]));
+                                            } else {
+                                                print_limited::<128>(&format_args!("find_offsets: get_field_offset also failed on great-grandparent's {}", inner.fields[i]));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    mfo.ok_or(Error {})?
                 }
             };
 
